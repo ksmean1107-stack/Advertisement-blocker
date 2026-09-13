@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         광고 차단기
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.2
 // @description  사이트에서 일반적인 광고 요소를 숨기고 차단합니다.
 // @author       You
 // @match        https://*/*
