@@ -7,8 +7,6 @@
 // @match        https://*/*
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
-// @grant        GM_setValue
-// @grant        GM_getValue
 // ==/UserScript==
 
 (function() {
@@ -124,6 +122,55 @@
     } else {
       document.addEventListener('DOMContentLoaded', showBadge);
     }
+  } catch (e) {}
+
+  // ---------------------------------------------------------------------
+  // 1-2. [임시 진단 모드] iOS Safari엔 개발자도구가 없으므로, 탭한 요소의
+  //      실제 HTML을 팝업으로 보여줘서 복사할 수 있게 함.
+  //      사용법: 오른쪽 위 "🔍 진단모드" 버튼 탭 → 광고 박스 탭 → 뜨는 텍스트 전체 복사
+  //      문제 해결되면 이 블록은 지워도 됩니다.
+  // ---------------------------------------------------------------------
+  let diagnosticMode = false;
+  try {
+    const showDiagButton = () => {
+      if (!document.body) return;
+      if (document.getElementById('__adblocker_diag_btn__')) return;
+      const btn = document.createElement('div');
+      btn.id = '__adblocker_diag_btn__';
+      btn.textContent = '🔍 진단모드';
+      btn.style.cssText = 'position:fixed;top:36px;right:8px;z-index:2147483647;background:#222;color:#fff;font-size:11px;padding:4px 8px;border-radius:6px;font-family:sans-serif;';
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        diagnosticMode = !diagnosticMode;
+        btn.style.background = diagnosticMode ? '#c00' : '#222';
+        btn.textContent = diagnosticMode ? '🔍 진단모드 ON (박스를 탭하세요)' : '🔍 진단모드';
+      }, true);
+      document.body.appendChild(btn);
+    };
+    if (document.body) {
+      showDiagButton();
+    } else {
+      document.addEventListener('DOMContentLoaded', showDiagButton);
+    }
+
+    document.addEventListener('click', function (e) {
+      if (!diagnosticMode) return;
+      if (e.target.id === '__adblocker_diag_btn__') return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+
+      // 탭한 지점에서부터 부모로 2단계 정도 올라간 컨테이너의 HTML을 보여줌
+      let el = e.target;
+      let container = el;
+      for (let i = 0; i < 2 && container.parentElement; i++) {
+        container = container.parentElement;
+      }
+      let html = container.outerHTML || '';
+      if (html.length > 2000) html = html.slice(0, 2000) + '\n...(길어서 생략됨)';
+      window.prompt('아래 내용 전체 선택 후 복사해서 Claude에게 붙여넣어 주세요:', html);
+    }, true);
   } catch (e) {}
 
   // ---------------------------------------------------------------------
