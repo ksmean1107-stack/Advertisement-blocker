@@ -9,8 +9,6 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @connect      raw.githubusercontent.com
-// @connect      cdn.jsdelivr.net
 // ==/UserScript==
 
 (function() {
