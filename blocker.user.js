@@ -11,7 +11,6 @@
 // @grant        GM_getValue
 // @connect      raw.githubusercontent.com
 // @connect      cdn.jsdelivr.net
-// @run-at       document-start
 // ==/UserScript==
 
 (function() {
