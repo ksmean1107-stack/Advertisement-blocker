@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         광고 차단기
 // @namespace    http://tampermonkey.net/
-// @version      1.5
+// @version      1.7
 // @description  사이트에서 일반적인 광고 요소를 숨기고 차단합니다.
 // @author       You
 // @match        https://*/*
@@ -330,6 +330,7 @@
     });
   }
 
+  let labelScanTimer = null;
   const observer = new MutationObserver((mutations) => {
     for (const m of mutations) {
       if (m.type === 'childList') {
@@ -338,6 +339,11 @@
         removeIfAd(m.target);
       }
     }
+    // 텍스트 라벨 스캔은 비용이 크므로 연속 변화를 묶어서 한 번만 실행(디바운스)
+    clearTimeout(labelScanTimer);
+    labelScanTimer = setTimeout(() => {
+      try { removeAdLabelCards(); } catch (e) {}
+    }, 300);
   });
 
   function startObserving() {
@@ -367,9 +373,65 @@
   };
 
   // ---------------------------------------------------------------------
-  // 9. href 기반 휴리스틱: 암호화/난독화된 네이티브 광고(예: 나무위키 파워링크) 대응
-  //    -> 광고 콘텐츠 자체는 숨겨도, 클릭 시 이동해야 하는 실제 링크(href)는
-  //       광고 서버(adcr.naver.com 등)를 가리킬 수밖에 없다는 점을 이용
+  // 9-1. [핵심] 텍스트 라벨 기반 탐지: "파워링크" / "광고" 표시 문구를 찾아서
+  //      해당 광고 카드 전체를 제거. 클래스명이 암호화돼 있어도 표시광고법상
+  //      "광고"라는 문구는 화면에 반드시 노출되어야 하므로 이 방식은 우회가 어려움.
+  // ---------------------------------------------------------------------
+  const AD_LABEL_TEXTS = ['파워링크', 'PowerLink', '스폰서 링크', '스폰서링크', 'Sponsored'];
+  // 단독으로 쓰였을 때만 광고 라벨로 간주(문장 속 단어는 제외)하기 위해 정확히 일치하는 경우만 매칭
+  const AD_BADGE_TEXTS = ['광고', 'AD', 'Ad'];
+  // 이 문구가 포함된 조상까지 올라가면 광고 카드 범위를 넘어선 것 -> 그 직전 요소를 삭제 대상으로 확정
+  const AD_BOUNDARY_RE = /관련\s*문서|이 저작물은|CC BY|분류\s*:|목차/;
+
+  function collectMatchingTextNodes(exactTexts) {
+    const results = [];
+    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const t = node.nodeValue ? node.nodeValue.trim() : '';
+      if (t && exactTexts.includes(t)) results.push(node);
+    }
+    return results;
+  }
+
+  function removeAdLabelCards() {
+    const labelNodes = collectMatchingTextNodes(AD_LABEL_TEXTS).concat(collectMatchingTextNodes(AD_BADGE_TEXTS));
+    const removedContainers = new Set();
+
+    labelNodes.forEach(textNode => {
+      let el = textNode.parentElement;
+      if (!el || el.dataset && el.dataset.__adblockerHandled) return;
+
+      let target = el;
+      let guard = 0;
+      while (el && el.parentElement && guard < 10) {
+        const parent = el.parentElement;
+        const text = parent.innerText || parent.textContent || '';
+        if (text.length > 2500 || AD_BOUNDARY_RE.test(text) || parent === document.body) {
+          break; // 여기서부터는 광고 카드 범위를 벗어남 -> target(직전 단계)을 삭제 대상으로 확정
+        }
+        target = parent;
+        el = parent;
+        guard++;
+      }
+
+      // 이미 지운 컨테이너의 하위 요소면 중복 처리 스킵
+      if (removedContainers.has(target)) return;
+      for (const removed of removedContainers) {
+        if (removed.contains(target)) return;
+      }
+
+      try {
+        target.querySelectorAll && target.querySelectorAll('*').forEach(n => { if (n.dataset) n.dataset.__adblockerHandled = '1'; });
+        removedContainers.add(target);
+        target.remove();
+        console.log('[AdBlocker] Removed ad-label card (text-based):', textNode.nodeValue.trim());
+      } catch (e) {}
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // 9-2. href 기반 휴리스틱 (보조): adcr.naver.com 등 명시적 광고 리다이렉트 링크
   // ---------------------------------------------------------------------
   const adLinkPatterns = [
     /adcr\.naver\.com/i,
@@ -423,6 +485,7 @@
     allSelectors().forEach(sel => {
       try { document.querySelectorAll(sel).forEach(el => el.remove()); } catch (e) {}
     });
+    try { removeAdLabelCards(); } catch (e) {}
     removeAdLinkContainers();
   }
 
