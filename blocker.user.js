@@ -7,6 +7,8 @@
 // @match        https://*/*
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
+// @grant        GM_setValue
+// @grant        GM_getValue
 // ==/UserScript==
 
 (function() {
@@ -102,6 +104,27 @@
     }
   }
   applyCss();
+
+  // ---------------------------------------------------------------------
+  // 1-1. [임시 디버그용] 스크립트가 실제로 이 페이지에서 실행되는지 눈으로 확인하기 위한 배지
+  //      문제 해결되면 이 블록은 지워도 됩니다.
+  // ---------------------------------------------------------------------
+  try {
+    const showBadge = () => {
+      if (!document.body) return;
+      if (document.getElementById('__adblocker_debug_badge__')) return;
+      const badge = document.createElement('div');
+      badge.id = '__adblocker_debug_badge__';
+      badge.textContent = '🛡️ 광고차단기 작동중';
+      badge.style.cssText = 'position:fixed;top:8px;right:8px;z-index:2147483647;background:#111;color:#0f0;font-size:11px;padding:4px 8px;border-radius:6px;font-family:sans-serif;opacity:0.85;pointer-events:none;';
+      document.body.appendChild(badge);
+    };
+    if (document.body) {
+      showBadge();
+    } else {
+      document.addEventListener('DOMContentLoaded', showBadge);
+    }
+  } catch (e) {}
 
   // ---------------------------------------------------------------------
   // 3. List-KR 계열 필터 목록 불러와서 파싱 (ABP/uBO 문법 일부 지원)
@@ -297,14 +320,84 @@
   };
 
   // ---------------------------------------------------------------------
-  // 9. 로드 완료 후 + 3초 뒤(필터 로드 지연 대비) 재정리
+  // 9. href 기반 휴리스틱: 암호화/난독화된 네이티브 광고(예: 나무위키 파워링크) 대응
+  //    -> 광고 콘텐츠 자체는 숨겨도, 클릭 시 이동해야 하는 실제 링크(href)는
+  //       광고 서버(adcr.naver.com 등)를 가리킬 수밖에 없다는 점을 이용
+  // ---------------------------------------------------------------------
+  const adLinkPatterns = [
+    /adcr\.naver\.com/i,
+    /search\.naver\.com\/.*[?&]where=ad/i,
+    /powerlink/i,
+    /googleadservices\.com\/pagead/i,
+    /google\.com\/aclk/i,
+    /googlesyndication\.com/i,
+    /adfit\.kakao\.com/i,
+    /adx\.coupang\.com/i,
+    /ads-partners\.coupang\.com/i
+  ];
+
+  function isAdLink(href) {
+    if (!href) return false;
+    return adLinkPatterns.some(re => re.test(href));
+  }
+
+  function removeAdLinkContainers() {
+    const anchors = document.querySelectorAll('a[href]');
+    anchors.forEach(a => {
+      try {
+        const href = a.getAttribute('href') || a.href || '';
+        if (!isAdLink(href)) return;
+
+        // 광고 링크 하나만 지우면 레이아웃이 깨지거나 불완전하게 남을 수 있으므로
+        // 상위 몇 단계까지 올라가서 "카드/박스" 형태로 보이는 컨테이너 전체를 제거 시도.
+        // 너무 상위(예: body 근처)까지 올라가면 페이지 전체가 날아갈 수 있어 4단계로 제한.
+        let target = a;
+        let container = a;
+        for (let i = 0; i < 4; i++) {
+          if (!container.parentElement) break;
+          container = container.parentElement;
+          // 부모가 명백히 페이지 전체 레이아웃(예: main, body, article 최상위)이면 더 안 올라감
+          const tag = container.tagName ? container.tagName.toLowerCase() : '';
+          if (['body', 'html', 'main', 'article'].includes(tag)) break;
+          target = container;
+        }
+        target.remove();
+        console.log('[AdBlocker] Removed obfuscated ad link container:', href);
+      } catch (e) {}
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // 10. 로드 완료 후 + 주기적 재정리 (암호화 해제/지연 렌더링 대비)
+  //     namuwiki류는 클라이언트에서 복호화 후 늦게 광고를 주입하는 경우가 많아
+  //     한 번만 검사하면 놓칠 수 있어 초반 15초간 반복 검사
   // ---------------------------------------------------------------------
   function cleanup() {
     allSelectors().forEach(sel => {
       try { document.querySelectorAll(sel).forEach(el => el.remove()); } catch (e) {}
     });
+    removeAdLinkContainers();
   }
+
   window.addEventListener('load', cleanup);
+  setTimeout(cleanup, 1000);
   setTimeout(cleanup, 3000);
+
+  let rescanCount = 0;
+  const rescanInterval = setInterval(() => {
+    cleanup();
+    rescanCount++;
+    if (rescanCount >= 15) clearInterval(rescanInterval); // 15초간 매초 재검사 후 중단(성능 보호)
+  }, 1000);
+
+  // href 변경/지연 삽입 대응: 링크 클릭 자체도 한번 더 방어 (혹시 컨테이너 제거를 놓친 경우 대비)
+  document.addEventListener('click', function (e) {
+    const a = e.target.closest && e.target.closest('a[href]');
+    if (a && isAdLink(a.getAttribute('href') || a.href || '')) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[AdBlocker] Blocked click on ad link:', a.href);
+    }
+  }, true);
 
 })();
