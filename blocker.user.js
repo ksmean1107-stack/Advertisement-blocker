@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         광고 차단기
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.8
 // @description  사이트에서 일반적인 광고 요소를 숨기고 차단합니다.
 // @author       You
 // @match        https://*/*
@@ -161,15 +161,19 @@
       e.stopPropagation();
       e.stopImmediatePropagation();
 
-      // 탭한 지점에서부터 부모로 2단계 정도 올라간 컨테이너의 HTML을 보여줌
+      // 탭한 지점부터 위로 8단계까지, 각 단계의 태그/클래스/텍스트 요약을 한 줄씩 보여줌
+      // (어느 단계가 광고 카드 전체 경계인지 파악하기 위함)
       let el = e.target;
-      let container = el;
-      for (let i = 0; i < 2 && container.parentElement; i++) {
-        container = container.parentElement;
+      const lines = [];
+      for (let i = 0; i < 8 && el; i++) {
+        const tag = el.tagName ? el.tagName.toLowerCase() : '?';
+        const cls = (typeof el.className === 'string' ? el.className : '') || '';
+        const attrs = el.attributes ? Array.from(el.attributes).filter(a => a.name.startsWith('data-v')).map(a => a.name).join(',') : '';
+        const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+        lines.push('[' + i + '] <' + tag + (cls ? ' class="' + cls + '"' : '') + (attrs ? ' ' + attrs : '') + '> 글자수:' + text.length + ' | ' + text.slice(0, 50));
+        el = el.parentElement;
       }
-      let html = container.outerHTML || '';
-      if (html.length > 2000) html = html.slice(0, 2000) + '\n...(길어서 생략됨)';
-      window.prompt('아래 내용 전체 선택 후 복사해서 Claude에게 붙여넣어 주세요:', html);
+      window.prompt('아래 내용 전체 선택 후 복사해서 Claude에게 붙여넣어 주세요 (탭한 지점부터 상위 8단계):', lines.join('\n'));
     }, true);
   } catch (e) {}
 
